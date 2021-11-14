@@ -78,7 +78,9 @@ namespace RimThreaded
         public static object allSustainersLock = new object();
         //public static object map_AttackTargetReservationManager_reservations_Lock = new object();
 
-
+        [ThreadStatic] public static ThingTickLimiter TLimiter;//TEST
+        //[ThreadStatic] public static Tokens tokens;
+        [ThreadStatic] public static int Tokens;
         public class ThreadInfo
         {
             public EventWaitHandle eventWaitStart = new AutoResetEvent(false);
@@ -225,8 +227,11 @@ namespace RimThreaded
             WorldPawns_Patch.InitializeThreadStatics();
             AttackTargetReservationManager_Patch.InitializeThreadStatics();
             ReservationManager_Patch.InitializeThreadStatics();
+
+            Tokens = int.MaxValue;
+            TLimiter = new ThingTickLimiter();// TEST
         }
-        private static void ProcessTicks(ThreadInfo threadInfo)
+        private static void ProcessTicks(ThreadInfo threadInfo) // TickLimiter Tick probably here
         {
             while (true)
             {

@@ -29,6 +29,5 @@ namespace RimThreaded
             __result = (AudioSource)threadInfo.safeFunctionResult;
             return false;
         }
-
     }
 }

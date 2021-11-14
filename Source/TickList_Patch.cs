@@ -93,6 +93,7 @@ namespace RimThreaded
             int currentTickInterval = tickList.TickInterval;
             normalThingList = tickList.thingLists[RimThreaded.callingTickManager.TicksGame % currentTickInterval];
             normalThingListTicks = normalThingList.Count;
+            RimThreaded.TLimiter.Tick();
         }
 
         public static void NormalThingTick()
@@ -105,7 +106,12 @@ namespace RimThreaded
                 if (thing.Destroyed) continue;
                 try
                 {
-                    thing.Tick();
+                    Thing t;
+                    while(RimThreaded.TLimiter.DeadLetterDequeue(out t))
+                    {
+                        t.Tick();
+                    }
+                    if(RimThreaded.TLimiter.TickRequest(thing))thing.Tick();
                 }
                 catch (Exception ex)
                 {

@@ -79,14 +79,16 @@
     <None Remove="Properties\**" />
   </ItemGroup>
   <ItemGroup>
+		<PackageReference Include="Krafs.Rimworld.Ref" Version="1.3.3159" />
 		<PackageReference Include="Lib.Harmony" Version="2.1.1" ExcludeAssets="runtime" />
 		<PackageReference Include="majorhoff.ThreadSafeLinkedList" Version="1.0.2" />
-		<PackageReference Include="majorhoff.ThreadSafeLinkedListRW" Version="1.3.0" />
+		<PackageReference Include="majorhoff.ThreadSafeLinkedListRW" Version="1.4.0" />
 		<PackageReference Include="Microsoft.NETCore.Platforms" Version="5.0.2" />
 		<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.2">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
+		<PackageReference Include="OptimizedPriorityQueue" Version="5.1.0" />
 		<PackageReference Include="Unity.Newtonsoft.Json" Version="7.0.0" />
 		<PackageReference Include="TaskPubliciser" Version="1.0.3">
 		  <PrivateAssets>all</PrivateAssets>

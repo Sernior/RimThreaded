@@ -717,19 +717,7 @@
       "ClassName": "Verse.Room",
       "ThreadStatics": [
         {
-          "FieldName": "uniqueContainedThingsSet"
-        },
-        {
-          "FieldName": "uniqueContainedThings"
-        },
-        {
-          "FieldName": "uniqueContainedThingsOfDef"
-        },
-        {
           "FieldName": "fields"
-        },
-        {
-          "FieldName": "tmpRegions"
         }
       ]
     },
@@ -943,9 +931,6 @@
     {
       "ClassName": "Verse.Grammar.GrammarResolver",
       "ThreadStatics": [
-        {
-          "FieldName": "rules"
-        },
         {
           "FieldName": "rulePool"
         },

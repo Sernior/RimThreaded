@@ -45,6 +45,9 @@ namespace RimThreaded
             Type original = typeof(PathFinder);
             Type patched = typeof(PathFinder_Patch);
             RimThreadedHarmony.Prefix(original, patched, "InitStatusesAndPushStartNode", null, false);
+
+            //Log.Message("REPLACING PATHFINDING");
+            //RimThreadedHarmony.Prefix(original, patched, nameof(FindPath), new Type[] { typeof(IntVec3), typeof(LocalTargetInfo), typeof(TraverseParms), typeof(PathEndMode), typeof(PathFinderCostTuning) });
         }
 
         public static bool InitStatusesAndPushStartNode(PathFinder __instance, ref int curIndex, IntVec3 start)
@@ -73,7 +76,416 @@ namespace RimThreaded
             regionCostCalculatorDict[__instance] = regionCostCalculatorWrapper;
             return;
         }
+        public static bool FindPath(PathFinder __instance, ref PawnPath __result, IntVec3 start, LocalTargetInfo dest, TraverseParms traverseParms, PathEndMode peMode = PathEndMode.OnCell, PathFinderCostTuning tuning = null)
+        {
+            if (DebugSettings.pathThroughWalls)
+            {
+                traverseParms.mode = TraverseMode.PassAllDestroyableThings;
+            }
+            Pawn pawn = traverseParms.pawn;
+            if (pawn != null && pawn.Map != __instance.map)
+            {
+                Log.Error(string.Concat("Tried to FindPath for pawn which is spawned in another map. His map PathFinder should have been used, not this one. pawn=", pawn, " pawn.Map=", pawn.Map, " map=", __instance.map));
+                __result = PawnPath.NotFound;
+                return false;
+            }
+            if (!start.IsValid)
+            {
+                Log.Error(string.Concat("Tried to FindPath with invalid start ", start, ", pawn= ", pawn));
+                __result = PawnPath.NotFound;
+                return false;
+            }
+            if (!dest.IsValid)
+            {
+                Log.Error(string.Concat("Tried to FindPath with invalid dest ", dest, ", pawn= ", pawn));
+                __result = PawnPath.NotFound;
+                return false;
+            }
+            if (traverseParms.mode == TraverseMode.ByPawn)
+            {
+                if (!pawn.CanReach(dest, peMode, Danger.Deadly, traverseParms.canBashDoors, traverseParms.canBashFences, traverseParms.mode))
+                {
+                    __result = PawnPath.NotFound;
+                    return false;
+                }
+            }
+            else if (!__instance.map.reachability.CanReach(start, dest, peMode, traverseParms))
+            {
+                __result = PawnPath.NotFound;
+                return false;
+            }
+            __instance.PfProfilerBeginSample(string.Concat("FindPath for ", pawn, " from ", start, " to ", dest, dest.HasThing ? (" at " + dest.Cell) : ""));
+            __instance.cellIndices = __instance.map.cellIndices;
+            __instance.pathingContext = __instance.map.pathing.For(traverseParms);
+            __instance.pathGrid = __instance.pathingContext.pathGrid;
+            __instance.traverseParms = traverseParms;
+            __instance.edificeGrid = __instance.map.edificeGrid.InnerArray;
+            __instance.blueprintGrid = __instance.map.blueprintGrid.InnerArray;
+            int Dest_X = dest.Cell.x;
+            int Dest_Z = dest.Cell.z;
+            int curIndex = __instance.cellIndices.CellToIndex(start);
+            int destinationIndex = __instance.cellIndices.CellToIndex(dest.Cell);
+            ByteGrid byteGrid = (traverseParms.alwaysUseAvoidGrid ? __instance.map.avoidGrid.Grid : pawn?.GetAvoidGrid());
+            bool PassAll = traverseParms.mode == TraverseMode.PassAllDestroyableThings || traverseParms.mode == TraverseMode.PassAllDestroyableThingsNotWater;
+            bool PassClosedDoorsButNotDestroyableThings = traverseParms.mode != TraverseMode.NoPassClosedDoorsOrWater && traverseParms.mode != TraverseMode.PassAllDestroyableThingsNotWater;
+            bool NotPassAll = !PassAll;
+            CellRect cellRect = __instance.CalculateDestinationRect(dest, peMode);
+            bool DestRectIsOne = cellRect.Width == 1 && cellRect.Height == 1;
+            int[] CostAtIndex = __instance.pathGrid.pathGrid;
+            TerrainDef[] topGrid = __instance.map.terrainGrid.topGrid;
+            EdificeGrid edificeGrid = __instance.map.edificeGrid;
+            int IterationsToBreak = 0;
+            int IterationsToRCCInit = 0;
+            Area allowedArea = __instance.GetAllowedArea(pawn);
+            BoolGrid lordWalkGrid = __instance.GetLordWalkGrid(pawn);
+            bool PawnExistsAndIsCollideble = pawn != null && PawnUtility.ShouldCollideWithPawns(pawn);
+            bool NotPassAllANDstartGetRegionOFmapExistsANDPassClosedDoorsButNotDT = !PassAll && start.GetRegion(__instance.map) != null && PassClosedDoorsButNotDestroyableThings;
+            bool NotPassAllORPassAll = !PassAll || !NotPassAll;
+            bool usedRegionHeuristics = false;
+            bool IsDraftedPawn = pawn?.Drafted ?? false;
+            int PawnPriority = ((pawn?.IsColonist ?? false) ? 100000 : 2000);// 
+            tuning = tuning ?? PathFinderCostTuning.DefaultTuning;
+            int costBlockedWallBase = tuning.costBlockedWallBase;
+            float costBlockedWallExtraPerHitPoint = tuning.costBlockedWallExtraPerHitPoint;
+            int costBlockedWallExtraForNaturalWalls = tuning.costBlockedWallExtraForNaturalWalls;
+            int costOffLordWalkGrid = tuning.costOffLordWalkGrid;
+            float CurrentHeuristicStrenght = __instance.DetermineHeuristicStrength(pawn, start, dest);
+            int CardinalMoveWeight;
+            int DiagonalMoveWeight;
+            if (pawn != null)
+            {
+                CardinalMoveWeight = pawn.TicksPerMoveCardinal;
+                DiagonalMoveWeight = pawn.TicksPerMoveDiagonal;
+            }
+            else
+            {
+                CardinalMoveWeight = 13;
+                DiagonalMoveWeight = 18;
+            }
 
+
+
+
+            __instance.CalculateAndAddDisallowedCorners(peMode, cellRect);
+            __instance.InitStatusesAndPushStartNode(ref curIndex, start);
+
+
+
+
+            while (true)
+            {
+
+
+
+                __instance.PfProfilerBeginSample("Open cell");
+                if (openList.Count <= 0)
+                {
+                    string text = ((pawn != null && pawn.CurJob != null) ? pawn.CurJob.ToString() : "null");
+                    string text2 = ((pawn != null && pawn.Faction != null) ? pawn.Faction.ToString() : "null");
+                    Log.Warning(string.Concat(pawn, " pathing from ", start, " to ", dest, " ran out of cells to process.\nJob:", text, "\nFaction: ", text2));
+                    __instance.DebugDrawRichData();
+                    __instance.PfProfilerEndSample();
+                    __instance.PfProfilerEndSample();
+                    __result = PawnPath.NotFound;
+                    return false;
+                }
+
+
+
+                CostNode costNode = openList.Pop();
+                curIndex = costNode.index;//iterative step.
+
+
+
+
+
+                if (costNode.cost != calcGrid[curIndex].costNodeCost)
+                {
+                    __instance.PfProfilerEndSample();
+                    continue;
+                }
+                if (calcGrid[curIndex].status == statusClosedValue)
+                {
+                    __instance.PfProfilerEndSample();
+                    continue;
+                }
+                IntVec3 StartPos = __instance.cellIndices.IndexToCell(curIndex);
+                int StartingX = StartPos.x;
+                int StartingY = StartPos.z;
+
+
+
+                //Log.Message("PATHFINDER X: " + StartingX + "\t" + "PATHFINDER Z: " + StartingY);
+
+
+
+                if (DestRectIsOne)
+                {
+                    if (curIndex == destinationIndex)
+                    {
+                        __instance.PfProfilerEndSample();
+                        PawnPath result = __instance.FinalizedPath(curIndex, usedRegionHeuristics);
+                        __instance.PfProfilerEndSample();
+                        __result = result;
+                        return false;
+                    }
+                }
+                else if (cellRect.Contains(StartPos) && !disallowedCornerIndices.Contains(curIndex))
+                {
+                    __instance.PfProfilerEndSample();
+                    PawnPath result2 = __instance.FinalizedPath(curIndex, usedRegionHeuristics);
+                    __instance.PfProfilerEndSample();
+                    __result = result2;
+                    return false;
+                }
+                if (IterationsToBreak > 160000)
+                {
+                    break;
+                }
+                __instance.PfProfilerEndSample();
+                __instance.PfProfilerBeginSample("Neighbor consideration");
+                for (int i = 0; i < 8; i++)
+                {
+                    uint AdjStartingX = (uint)(StartingX + Directions[i]);
+                    uint AdjStartingY = (uint)(StartingY + Directions[i + 8]);
+                    if (AdjStartingX >= __instance.mapSizeX || AdjStartingY >= __instance.mapSizeZ)
+                    {
+                        continue;
+                    }
+                    int IAdjStartingX = (int)AdjStartingX;
+                    int IAdjStatingY = (int)AdjStartingY;
+                    int IndexOfAdjCell = __instance.cellIndices.CellToIndex(IAdjStartingX, IAdjStatingY);
+                    if (calcGrid[IndexOfAdjCell].status == statusClosedValue && !usedRegionHeuristics)
+                    {
+                        continue;
+                    }
+                    int num15 = 0;
+                    bool NotWalkableFast = false;
+                    if (!PassClosedDoorsButNotDestroyableThings && new IntVec3(IAdjStartingX, 0, IAdjStatingY).GetTerrain(__instance.map).HasTag("Water"))
+                    {
+                        continue;
+                    }
+                    if (!__instance.pathGrid.WalkableFast(IndexOfAdjCell))
+                    {
+                        if (!PassAll)
+                        {
+                            continue;
+                        }
+                        NotWalkableFast = true;
+                        num15 += costBlockedWallBase;
+                        Building building = edificeGrid[IndexOfAdjCell];
+                        if (building == null || !IsDestroyable(building))
+                        {
+                            continue;
+                        }
+                        num15 += (int)((float)building.HitPoints * costBlockedWallExtraPerHitPoint);
+                        if (!building.def.IsBuildingArtificial)
+                        {
+                            num15 += costBlockedWallExtraForNaturalWalls;
+                        }
+                    }
+                    switch (i)
+                    {
+                        case 4:
+                            if (__instance.BlocksDiagonalMovement(curIndex - __instance.mapSizeX))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            if (__instance.BlocksDiagonalMovement(curIndex + 1))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            break;
+                        case 5:
+                            if (__instance.BlocksDiagonalMovement(curIndex + __instance.mapSizeX))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            if (__instance.BlocksDiagonalMovement(curIndex + 1))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            break;
+                        case 6:
+                            if (__instance.BlocksDiagonalMovement(curIndex + __instance.mapSizeX))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            if (__instance.BlocksDiagonalMovement(curIndex - 1))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            break;
+                        case 7:
+                            if (__instance.BlocksDiagonalMovement(curIndex - __instance.mapSizeX))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            if (__instance.BlocksDiagonalMovement(curIndex - 1))
+                            {
+                                if (NotPassAllORPassAll)
+                                {
+                                    continue;
+                                }
+                                num15 += costBlockedWallBase;
+                            }
+                            break;
+                    }
+                    int CostToMove = ((i > 3) ? DiagonalMoveWeight : CardinalMoveWeight);
+                    CostToMove += num15;
+                    if (!NotWalkableFast)
+                    {
+                        CostToMove += CostAtIndex[IndexOfAdjCell];
+                        CostToMove = ((!IsDraftedPawn) ? (CostToMove + topGrid[IndexOfAdjCell].extraNonDraftedPerceivedPathCost) : (CostToMove + topGrid[IndexOfAdjCell].extraDraftedPerceivedPathCost));
+                    }
+                    if (byteGrid != null)
+                    {
+                        CostToMove += byteGrid[IndexOfAdjCell] * 8;
+                    }
+                    if (allowedArea != null && !allowedArea[IndexOfAdjCell])
+                    {
+                        CostToMove += 600;
+                    }
+                    if (PawnExistsAndIsCollideble && PawnUtility.AnyPawnBlockingPathAt(new IntVec3(IAdjStartingX, 0, IAdjStatingY), pawn, actAsIfHadCollideWithPawnsJob: false, collideOnlyWithStandingPawns: false, forPathFinder: true))
+                    {
+                        CostToMove += 175;
+                    }
+                    Building building2 = __instance.edificeGrid[IndexOfAdjCell];
+                    if (building2 != null)
+                    {
+                        __instance.PfProfilerBeginSample("Edifices");
+                        int buildingCost = GetBuildingCost(building2, traverseParms, pawn, tuning);
+                        if (buildingCost == int.MaxValue)
+                        {
+                            __instance.PfProfilerEndSample();
+                            continue;
+                        }
+                        CostToMove += buildingCost;
+                        __instance.PfProfilerEndSample();
+                    }
+                    List<Blueprint> list = __instance.blueprintGrid[IndexOfAdjCell];
+                    if (list != null)
+                    {
+                        __instance.PfProfilerBeginSample("Blueprints");
+                        int num17 = 0;
+                        for (int j = 0; j < list.Count; j++)
+                        {
+                            num17 = Mathf.Max(num17, GetBlueprintCost(list[j], pawn));
+                        }
+                        if (num17 == int.MaxValue)
+                        {
+                            __instance.PfProfilerEndSample();
+                            continue;
+                        }
+                        CostToMove += num17;
+                        __instance.PfProfilerEndSample();
+                    }
+                    if (tuning.custom != null)
+                    {
+                        CostToMove += tuning.custom.CostOffset(StartPos, new IntVec3(IAdjStartingX, 0, IAdjStatingY));
+                    }
+                    if (lordWalkGrid != null && !lordWalkGrid[new IntVec3(IAdjStartingX, 0, IAdjStatingY)])
+                    {
+                        CostToMove += costOffLordWalkGrid;
+                    }
+                    int TotalCostToMove = CostToMove + calcGrid[curIndex].knownCost;
+                    ushort status = calcGrid[IndexOfAdjCell].status;
+                    if (status == statusClosedValue || status == statusOpenValue)
+                    {
+                        int num19 = 0;
+                        if (status == statusClosedValue)
+                        {
+                            num19 = CardinalMoveWeight;
+                        }
+                        if (calcGrid[IndexOfAdjCell].knownCost <= TotalCostToMove + num19)
+                        {
+                            continue;
+                        }
+                    }
+                    if (usedRegionHeuristics)
+                    {
+                        calcGrid[IndexOfAdjCell].heuristicCost = Mathf.RoundToInt((float)__instance.regionCostCalculator.GetPathCostFromDestToRegion(IndexOfAdjCell) * RegionHeuristicWeightByNodesOpened.Evaluate(IterationsToRCCInit));
+                        if (calcGrid[IndexOfAdjCell].heuristicCost < 0)
+                        {
+                            Log.ErrorOnce(string.Concat("Heuristic cost overflow for ", pawn.ToStringSafe(), " pathing from ", start, " to ", dest, "."), pawn.GetHashCode() ^ 0xB8DC389);
+                            calcGrid[IndexOfAdjCell].heuristicCost = 0;
+                        }
+                    }
+                    else if (status != statusClosedValue && status != statusOpenValue)
+                    {
+                        int dx = Math.Abs(IAdjStartingX - Dest_X);
+                        int dz = Math.Abs(IAdjStatingY - Dest_Z);
+                        int num20 = GenMath.OctileDistance(dx, dz, CardinalMoveWeight, DiagonalMoveWeight);
+                        calcGrid[IndexOfAdjCell].heuristicCost = Mathf.RoundToInt((float)num20 * CurrentHeuristicStrenght);
+                    }
+                    int FinalCost = TotalCostToMove + calcGrid[IndexOfAdjCell].heuristicCost;
+                    if (FinalCost < 0)
+                    {
+                        Log.ErrorOnce(string.Concat("Node cost overflow for ", pawn.ToStringSafe(), " pathing from ", start, " to ", dest, "."), pawn.GetHashCode() ^ 0x53CB9DE);
+                        FinalCost = 0;
+                    }
+                    calcGrid[IndexOfAdjCell].parentIndex = curIndex;
+                    calcGrid[IndexOfAdjCell].knownCost = TotalCostToMove;
+                    calcGrid[IndexOfAdjCell].status = statusOpenValue;
+                    calcGrid[IndexOfAdjCell].costNodeCost = FinalCost;
+                    IterationsToRCCInit++;
+
+
+
+                    openList.Push(new CostNode(IndexOfAdjCell, FinalCost));
+
+
+
+
+                }
+                __instance.PfProfilerEndSample();
+                IterationsToBreak++;
+                calcGrid[curIndex].status = statusClosedValue;
+                if (IterationsToRCCInit >= PawnPriority && NotPassAllANDstartGetRegionOFmapExistsANDPassClosedDoorsButNotDT && !usedRegionHeuristics)
+                {
+                    usedRegionHeuristics = true;
+                    __instance.regionCostCalculator.Init(cellRect, traverseParms, CardinalMoveWeight, DiagonalMoveWeight, byteGrid, allowedArea, IsDraftedPawn, disallowedCornerIndices);
+                    __instance.InitStatusesAndPushStartNode(ref curIndex, start);
+                    IterationsToRCCInit = 0;
+                    IterationsToBreak = 0;
+                }
+            }
+            Log.Warning(string.Concat(pawn, " pathing from ", start, " to ", dest, " hit search limit of ", 160000, " cells."));
+            __instance.DebugDrawRichData();
+            __instance.PfProfilerEndSample();
+            __instance.PfProfilerEndSample();
+            __result = PawnPath.NotFound;
+            return false;
+        }
+        /*
         public static bool FindPath(PathFinder __instance, ref PawnPath __result, IntVec3 start, LocalTargetInfo dest, TraverseParms traverseParms, PathEndMode peMode = PathEndMode.OnCell)
         {
             if (DebugSettings.pathThroughWalls)
@@ -505,7 +917,7 @@ namespace RimThreaded
             __result = PawnPath.NotFound;
             return false;
         }
-
+        */
         static readonly Type costNodeType = TypeByName("Verse.AI.PathFinder+CostNode");
         static readonly Type icomparerCostNodeType1 = typeof(IComparer<>).MakeGenericType(costNodeType);
         static readonly Type fastPriorityQueueCostNodeType1 = typeof(FastPriorityQueue<>).MakeGenericType(costNodeType);

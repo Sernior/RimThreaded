@@ -24,6 +24,9 @@ namespace RimThreaded
 		{
 			Type original = typeof(ReservationManager);
 			Type patched = typeof(ReservationManager_Patch);
+			/*
+			 * for the moment
+			 * 
 			RimThreadedHarmony.Prefix(original, patched, nameof(CanReserve));
 			RimThreadedHarmony.Prefix(original, patched, nameof(CanReserveStack));
 			RimThreadedHarmony.Prefix(original, patched, nameof(Reserve));
@@ -40,9 +43,121 @@ namespace RimThreaded
 			RimThreadedHarmony.Prefix(original, patched, nameof(DebugString));
 			RimThreadedHarmony.Prefix(original, patched, nameof(DebugDrawReservations));
 			RimThreadedHarmony.Prefix(original, patched, nameof(ExposeData));
+			*/
+			MethodLocker.LockMethodOnInstance(original, "CanReserve", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "CanReserveStack", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "Reserve", LockFlag.WriterLock);
+			MethodLocker.LockMethodOnInstance(original, "Release", LockFlag.WriterLock);
+			MethodLocker.LockMethodOnInstance(original, "ReleaseAllForTarget", LockFlag.WriterLock);
+			MethodLocker.LockMethodOnInstance(original, "ReleaseClaimedBy", LockFlag.WriterLock);
+			MethodLocker.LockMethodOnInstance(original, "ReleaseAllClaimedBy", LockFlag.WriterLock);
+			MethodLocker.LockMethodOnInstance(original, "FirstReservationFor", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "IsReservedByAnyoneOf", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "FirstRespectedReserver", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "ReservedBy", LockFlag.ReaderLock, new Type[] { typeof(LocalTargetInfo), typeof(Pawn), typeof(Job) });
+			MethodLocker.LockMethodOnInstance(original, "AllReservedThings", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "DebugString", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "DebugDrawReservations", LockFlag.ReaderLock);
+			MethodLocker.LockMethodOnInstance(original, "ExposeData", LockFlag.WriterLock);
 
-			//RimThreadedHarmony.Postfix(original, patched, "Release", "PostRelease");
-			//RimThreadedHarmony.Postfix(original, patched, "Release", "PostReleaseAllForTarget");
+
+			RimThreadedHarmony.Postfix(original, patched, "Reserve", nameof(PostReserve));
+			RimThreadedHarmony.Postfix(original, patched, "Release", nameof(PostRelese));
+			RimThreadedHarmony.Postfix(original, patched, "ReleaseAllForTarget", nameof(PostReleaseAllForTarget));
+			RimThreadedHarmony.Postfix(original, patched, "ReleaseAllClaimedBy", nameof(PostReleaseAllClaimedBy));
+			RimThreadedHarmony.Postfix(original, patched, "ReleaseClaimedBy", nameof(PostReleaseClaimedBy));
+		}
+		public static void PostReleaseClaimedBy(ReservationManager __instance, Pawn claimant, Job job)
+        {
+			if (claimant == null)
+			{
+				return;
+			}
+			for (int num = __instance.reservations.Count - 1; num >= 0; num--)
+			{
+				if (__instance.reservations[num].Claimant == claimant && __instance.reservations[num].Job == job)
+				{
+					Thing thing = __instance.reservations[num].target.Thing;
+					if (thing != null && thing.def.EverHaulable)
+					{
+						HaulingCache.ReregisterHaulableItem(thing);
+					}
+					if (thing is Plant plant)
+					{
+						JumboCell.ReregisterObject(__instance.map, plant.Position, RimThreaded.plantHarvest_Cache);
+					}
+				}
+			}
+		}
+		public static void PostReleaseAllClaimedBy(ReservationManager __instance, Pawn claimant)
+        {
+			if (claimant == null)
+			{
+				return;
+			}
+			for (int num = __instance.reservations.Count - 1; num >= 0; num--)
+			{
+				if (__instance.reservations[num].Claimant == claimant)
+				{
+					Thing thing = __instance.reservations[num].target.Thing;
+					if (thing != null && thing.def.EverHaulable)
+					{
+						HaulingCache.ReregisterHaulableItem(thing);
+					}
+					if (thing is Plant plant)
+					{
+						JumboCell.ReregisterObject(__instance.map, plant.Position, RimThreaded.plantHarvest_Cache);
+					}
+				}
+			}
+		}
+		public static void PostReleaseAllForTarget(ReservationManager __instance, Thing t)
+        {
+			if (t == null)
+			{
+				return;
+			}
+			if (t.def.EverHaulable)
+			{
+				HaulingCache.ReregisterHaulableItem(t);
+			}
+			if (t is Plant plant)
+			{
+				JumboCell.ReregisterObject(__instance.map, plant.Position, RimThreaded.plantHarvest_Cache);
+			}
+		}
+		public static void PostRelese(ReservationManager __instance, LocalTargetInfo target, Pawn claimant, Job job)
+        {
+			if (target == null) return;
+			Thing thing = target.Thing;
+			if (thing != null && thing.def.EverHaulable)
+			{
+				HaulingCache.ReregisterHaulableItem(target.Thing);
+			}
+			if (thing is Plant plant)
+			{
+				JumboCell.ReregisterObject(__instance.map, plant.Position, RimThreaded.plantHarvest_Cache);
+			}
+		}
+		public static void PostReserve(ReservationManager __instance, ref bool __result,
+		  Pawn claimant,
+		  Job job,
+		  LocalTargetInfo target,
+		  int maxPawns = 1,
+		  int stackCount = -1,
+		  ReservationLayerDef layer = null,
+		  bool errorOnFailed = true)
+        {
+			if (target == null) return;
+			Thing thing = target.Thing;
+			if (thing != null && thing.def.EverHaulable)
+			{
+				HaulingCache.ReregisterHaulableItem(target.Thing);
+			}
+			if (thing is Plant plant)
+			{
+				JumboCell.ReregisterObject(__instance.map, plant.Position, RimThreaded.plantHarvest_Cache);
+			}
 		}
 		internal static void InitializeThreadStatics()
 		{
@@ -257,7 +372,7 @@ namespace RimThreaded
             }
 			return null;
 		}
-
+		/*
 		public static void PostRelease(ReservationManager __instance, LocalTargetInfo target, Pawn claimant, Job job)
 		{
 			if (target.Thing != null && target.Thing.def.EverHaulable && target.Thing.Map != null)
@@ -271,7 +386,7 @@ namespace RimThreaded
 			{
 				HaulingCache.ReregisterHaulableItem(target.Thing);
 			}
-		}
+		}*/
 
 		public static bool CanReserve(ReservationManager __instance, ref bool __result, Pawn claimant, LocalTargetInfo target, int maxPawns = 1, int stackCount = -1, ReservationLayerDef layer = null, bool ignoreOtherReservations = false)
 		{

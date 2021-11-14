@@ -6,6 +6,7 @@ using HarmonyLib;
 using Verse;
 using Verse.Grammar;
 using static HarmonyLib.AccessTools;
+using System.Reflection;
 using static Verse.Grammar.GrammarResolver;
 
 namespace RimThreaded
@@ -34,6 +35,29 @@ namespace RimThreaded
 			//RimThreadedHarmony.Transpile(original, patched, nameof(Resolve), new Type[] {
 			//	typeof(string), typeof(GrammarRequest), typeof(string), typeof(bool), typeof(string), typeof(List<string>), typeof(List<string>), typeof(bool)
 			//});
+			RimThreadedHarmony.Transpile(original, patched, nameof(ResolveUnsafe),
+				new Type[] { typeof(string), typeof(GrammarRequest), typeof(bool), typeof(string), typeof(bool), typeof(bool), typeof(List<string>), typeof(List<string>), typeof(bool) }
+				);
+		}
+		public static void ClearGR(Dictionary<string, List<RuleEntry>> o)
+        {
+			o = new Dictionary<string, List<RuleEntry>>();
+
+		}
+		public static IEnumerable<CodeInstruction> ResolveUnsafe(IEnumerable<CodeInstruction> instructions, ILGenerator iLGenerator)
+		{
+			Type rules = typeof(Dictionary<string, List<RuleEntry>>);
+			foreach (CodeInstruction i in instructions)
+			{
+				if (i.opcode == OpCodes.Callvirt)
+				{
+					if ((MethodInfo)i.operand == Method(rules, "Clear"))
+					{
+						i.operand = Method(typeof(GrammarResolver_Patch), nameof(ClearGR));
+					}
+				}
+				yield return i;
+			}
 		}
 		public static bool Resolve(ref string __result, string rootKeyword, GrammarRequest request, string debugLabel = null, bool forceLog = false, string untranslatedRootKeyword = null, List<string> extraTags = null, List<string> outTags = null, bool capitalizeFirstSentence = true)
 		{
@@ -74,7 +98,7 @@ namespace RimThreaded
 				return false;
 			}
 		}
-
+		/*
 		public static IEnumerable<CodeInstruction> ResolveUnsafe(IEnumerable<CodeInstruction> instructions, ILGenerator iLGenerator)
 		{
 			List<CodeInstruction> instructionsList = instructions.ToList();
@@ -96,7 +120,7 @@ namespace RimThreaded
 			yield return instructionsList[i++];
 			yield return instructionsList[i++];
 		}
-
+		*/
 		public static IEnumerable<CodeInstruction> Resolve(IEnumerable<CodeInstruction> instructions, ILGenerator iLGenerator)
 		{
 			List<CodeInstruction> instructionsList = instructions.ToList();

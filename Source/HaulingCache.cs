@@ -71,13 +71,23 @@ namespace RimThreaded
 				//Log.Warning("IsReserved");
 				return;
 			}
+
+			if(map.reservationManager.IsReservedByAnyoneOf(haulableThing, Faction.OfPlayer))
+            {
+				return;
+            }
+			/*
             List<Reservation> reservations = ReservationManager_Patch.getReservationTargetList(map.reservationManager, haulableThing);
 			if (reservations != null && reservations.Count > 0)
             {
 				return;
-            }
-			int num3 = 0;
-			int num4 = 0;
+            }*/
+
+
+			//int num3 = 0;
+			//int num4 = 0;
+			
+			/* // ??? if that list exists is reserved and we should have already returned
 			List<Reservation> reservationTargetList = ReservationManager_Patch.getReservationTargetList(map.reservationManager, haulableThing);
 			foreach (Reservation reservation in reservationTargetList)
 			{
@@ -104,9 +114,10 @@ namespace RimThreaded
 						}
 					}
 				}
-			}
+			}*/
 
-			int storagePriority = (int)StoreUtility.CurrentStoragePriorityOf(haulableThing);
+
+				int storagePriority = (int)StoreUtility.CurrentStoragePriorityOf(haulableThing);
 			if (TryFindBestBetterStoreCellFor(haulableThing, null, map, StoreUtility.CurrentStoragePriorityOf(haulableThing), null, out _, false) && //fast check
 				HaulToStorageJobTest(haulableThing)) { //slower check
 				AddThingToAwaitingHaulingHashSets(haulableThing);
@@ -517,7 +528,8 @@ namespace RimThreaded
 								{
 									if (pawn.CanReach(tryThing, PathEndMode.ClosestTouch, pawn.NormalMaxDanger()))
 									{
-										if (CanReserveTest(pawn.Map.reservationManager, pawn, tryThing))
+										//if (CanReserveTest(pawn.Map.reservationManager, pawn, tryThing))
+										if(map.reservationManager.CanReserve(pawn,tryThing))
 										{
 											if (pawn.health.capacities.CapableOf(PawnCapacityDefOf.Manipulation))
 											{
